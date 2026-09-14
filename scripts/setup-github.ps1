@@ -45,27 +45,31 @@ $ciContexts = @(
 <#
   Protection matrix.
 
-  production requires only 1 approval, not 2, because approvals must come from
-  someone OTHER than the author. With a 2-person org, a 2-approval rule on
-  production can never be satisfied and every release needs an admin override -
-  which trains everyone to bypass the gate. Raise to 2 when the org has 3+ members.
+  Approvals are 0 because GitHub forbids self-approval and there is currently no
+  second reviewer available. Requiring 1 would make every PR unmergeable.
+  require_code_owner_reviews must also stay false - it demands an approval
+  regardless of the count.
+
+  Everything else still holds: PRs are mandatory, CI must pass, history stays
+  linear, force pushes and deletions are blocked, and production additionally
+  applies the rules to admins. Raise Approvals when a reviewer is available.
 #>
 $protection = @{
     dev = @{
-        Approvals       = 1
+        Approvals       = 0
         CodeOwners      = $false
         EnforceAdmins   = $false
         Conversation    = $false
     }
     staging = @{
-        Approvals       = 1
-        CodeOwners      = $true
+        Approvals       = 0
+        CodeOwners      = $false
         EnforceAdmins   = $false
         Conversation    = $true
     }
     production = @{
-        Approvals       = 1   # <- raise to 2 once the org has 3+ members
-        CodeOwners      = $true
+        Approvals       = 0
+        CodeOwners      = $false
         EnforceAdmins   = $true
         Conversation    = $true
     }
