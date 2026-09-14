@@ -1,0 +1,98 @@
+global:
+  registry: ghcr.io/echelon-luxe
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+# Applied to every service, overridden per service in `services:`.
+defaults:
+  replicas: 1
+
+  # Set by the GitOps promotion PR. Never "latest" - it is mutable and unrollbackable.
+  image:
+    tag: dev
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+  # liveness must never check dependencies - failing it kills the container,
+  # so a DB blip would restart every pod at once. Dependency checks go in readiness.
+  probes:
+    startup:
+      path: /healthz
+      periodSeconds: 5
+      failureThreshold: 30
+    readiness:
+      path: /readyz
+      periodSeconds: 10
+      failureThreshold: 3
+    liveness:
+      path: /healthz
+      periodSeconds: 20
+      failureThreshold: 3
+
+  terminationGracePeriodSeconds: 30
+
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 0
+
+  env: {}
+
+services:
+  api-gateway:
+    port: 8080
+    public: true
+    replicas: 2
+  user-service:
+    port: 3001
+  shipment-service:
+    port: 3002
+  driver-service:
+    port: 3003
+  tracking-service:
+    port: 3004
+  notification-service:
+    port: 3005
+
+# Everything routes to the gateway. Exposing backends directly would bypass
+# its JWT verification and rate limiting.
+ingress:
+  enabled: true
+  className: nginx
+  host: logitrack.local
+  annotations: {}
+
+certificates:
+  enabled: true
+  secretName: logitrack-tls
+  issuer:
+    type: selfSigned    # selfSigned for kind, acme for real DNS
+    name: logitrack-issuer
+    acme:
+      server: https://acme-staging-v02.api.letsencrypt.org/directory
+      email: ""
+
+serviceAccount:
+  create: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

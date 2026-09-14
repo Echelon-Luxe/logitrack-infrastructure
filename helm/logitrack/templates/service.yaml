@@ -1,0 +1,21 @@
+{{- range $name, $svc := .Values.services }}
+{{- $cfg := include "logitrack.config" (dict "svc" $svc "root" $) | fromYaml }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "logitrack.labels" $ | nindent 4 }}
+    {{- include "logitrack.selectorLabels" (dict "name" $name) | nindent 4 }}
+spec:
+  # ClusterIP everywhere - external traffic arrives only through the Ingress.
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $cfg.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "logitrack.selectorLabels" (dict "name" $name) | nindent 4 }}
+{{- end }}

@@ -1,0 +1,43 @@
+{{- if .Values.ingress.enabled }}
+{{- $gateway := "" }}
+{{- $gatewayPort := 0 }}
+{{- range $name, $svc := .Values.services }}
+  {{- if $svc.public }}
+    {{- $gateway = $name }}
+    {{- $gatewayPort = $svc.port }}
+  {{- end }}
+{{- end }}
+{{- if not $gateway }}
+  {{- fail "ingress.enabled is true but no service is marked `public: true`" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: logitrack
+  labels:
+    {{- include "logitrack.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.certificates.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.certificates.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # All paths to the gateway; backends are not externally routable.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $gateway }}
+                port:
+                  number: {{ $gatewayPort }}
+{{- end }}

@@ -1,0 +1,48 @@
+{{- if .Values.certificates.enabled }}
+{{- $issuer := .Values.certificates.issuer }}
+# Namespaced Issuer, not ClusterIssuer - dev cannot mint certs production trusts.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer.name }}
+  labels:
+    {{- include "logitrack.labels" . | nindent 4 }}
+spec:
+  {{- if eq $issuer.type "selfSigned" }}
+  # kind has no public DNS, so an ACME HTTP-01 challenge can never complete.
+  selfSigned: {}
+  {{- else if eq $issuer.type "acme" }}
+  acme:
+    server: {{ $issuer.acme.server }}
+    email: {{ required "certificates.issuer.acme.email is required for the acme issuer" $issuer.acme.email }}
+    privateKeySecretRef:
+      name: {{ $issuer.name }}-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.ingress.className }}
+  {{- else }}
+  {{- fail (printf "certificates.issuer.type must be selfSigned or acme, got %q" $issuer.type) }}
+  {{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: logitrack-tls
+  labels:
+    {{- include "logitrack.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.certificates.secretName }}
+  issuerRef:
+    name: {{ $issuer.name }}
+    kind: Issuer
+  commonName: {{ .Values.ingress.host }}
+  dnsNames:
+    - {{ .Values.ingress.host | quote }}
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+{{- end }}
