@@ -1,0 +1,22 @@
+{{- range $name, $svc := .Values.services }}
+{{- $cfg := include "logitrack.config" (dict "svc" $svc "root" $) | fromYaml }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    {{- include "logitrack.labels" $ | nindent 4 }}
+    {{- include "logitrack.selectorLabels" (dict "name" $name) | nindent 4 }}
+data:
+  # Non-secret config only. ConfigMaps are plain text in etcd.
+  NODE_ENV: {{ $.Values.env | default "development" | quote }}
+  LOG_LEVEL: {{ $cfg.logLevel | default "info" | quote }}
+  PORT: {{ $cfg.port | quote }}
+  SERVICE_NAME: {{ printf "logitrack-%s" $name | quote }}
+  {{- range $peer, $peerCfg := $.Values.services }}
+  {{- if ne $peer $name }}
+  {{ $peer | upper | replace "-" "_" }}_URL: {{ printf "http://%s:%v" $peer ($peerCfg.port) | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

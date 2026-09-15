@@ -1,0 +1,45 @@
+# DEV.  helm upgrade -f values.yaml -f values-dev.yaml
+
+env: development
+
+ingress:
+  host: logitrack.local
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+
+certificates:
+  enabled: true
+  secretName: logitrack-tls
+  issuer:
+    type: selfSigned
+    name: logitrack-issuer
+
+defaults:
+  replicas: 1
+  logLevel: debug
+  resources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+
+services:
+  api-gateway:
+    replicas: 1
+    image: { tag: dev }
+  user-service:
+    image: { tag: dev }
+  shipment-service:
+    image: { tag: dev }
+  driver-service:
+    image: { tag: dev }
+  tracking-service:
+    image: { tag: dev }
+  notification-service:
+    image: { tag: dev }
