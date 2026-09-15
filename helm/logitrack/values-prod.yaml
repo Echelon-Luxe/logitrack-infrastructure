@@ -1,0 +1,62 @@
+# PRODUCTION.  helm upgrade -f values.yaml -f values-prod.yaml
+# Image tags are git SHAs, set by the GitOps promotion PR.
+
+env: production
+
+ingress:
+  host: logitrack.example.com
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+
+certificates:
+  enabled: true
+  secretName: logitrack-tls
+  issuer:
+    type: acme
+    name: logitrack-issuer
+    acme:
+      # Staging endpoint. Production has a 5-duplicate-certs-per-week limit that
+      # locks you out for 7 days once exhausted. Switch only when issuance works.
+      server: https://acme-staging-v02.api.letsencrypt.org/directory
+      email: ""   # required - the chart fails fast if empty
+
+defaults:
+  replicas: 3
+  logLevel: info
+  # Starting estimates, not measurements. Replace with observed p95 after load test.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  terminationGracePeriodSeconds: 60
+
+services:
+  api-gateway:
+    replicas: 4
+    autoscaling:
+      enabled: true
+      minReplicas: 4
+      maxReplicas: 20
+      targetCPUUtilizationPercentage: 65
+    image: { tag: REPLACE_WITH_GIT_SHA }
+  user-service:
+    image: { tag: REPLACE_WITH_GIT_SHA }
+  shipment-service:
+    image: { tag: REPLACE_WITH_GIT_SHA }
+  driver-service:
+    image: { tag: REPLACE_WITH_GIT_SHA }
+  tracking-service:
+    image: { tag: REPLACE_WITH_GIT_SHA }
+  notification-service:
+    image: { tag: REPLACE_WITH_GIT_SHA }

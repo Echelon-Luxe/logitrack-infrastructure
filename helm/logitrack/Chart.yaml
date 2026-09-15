@@ -1,0 +1,17 @@
+apiVersion: v2
+name: logitrack
+description: LogiTrack platform - all services deployed from one chart
+type: application
+
+# version      = the chart's own version. Bump when templates change.
+# appVersion   = the application release this chart defaults to. Image tags are
+#                set per service in the values files, so this is informational.
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - logistics
+  - microservices
+
+maintainers:
+  - name: Echelon-Luxe
