@@ -45,27 +45,31 @@ $ciContexts = @(
 <#
   Protection matrix.
 
-  production requires only 1 approval, not 2, because approvals must come from
-  someone OTHER than the author. With a 2-person org, a 2-approval rule on
-  production can never be satisfied and every release needs an admin override -
-  which trains everyone to bypass the gate. Raise to 2 when the org has 3+ members.
+  Approvals are 0 because GitHub forbids self-approval and there is currently no
+  second reviewer available. Requiring 1 would make every PR unmergeable.
+  require_code_owner_reviews must also stay false - it demands an approval
+  regardless of the count.
+
+  Everything else still holds: PRs are mandatory, CI must pass, history stays
+  linear, force pushes and deletions are blocked, and production additionally
+  applies the rules to admins. Raise Approvals when a reviewer is available.
 #>
 $protection = @{
     dev = @{
-        Approvals       = 1
+        Approvals       = 0
         CodeOwners      = $false
         EnforceAdmins   = $false
         Conversation    = $false
     }
     staging = @{
-        Approvals       = 1
-        CodeOwners      = $true
+        Approvals       = 0
+        CodeOwners      = $false
         EnforceAdmins   = $false
         Conversation    = $true
     }
     production = @{
-        Approvals       = 1   # <- raise to 2 once the org has 3+ members
-        CodeOwners      = $true
+        Approvals       = 0
+        CodeOwners      = $false
         EnforceAdmins   = $true
         Conversation    = $true
     }
@@ -119,14 +123,37 @@ foreach ($r in $allRepos) {
     $local = Join-Path $Root $r
     if (-not (Test-Path "$local\.git")) { Write-Host "  skip push (no local repo)" -ForegroundColor DarkGray; continue }
 
+    # NOTE: do not `git remote remove` unconditionally - it exits non-zero when
+    # origin is absent, and under ErrorActionPreference=Stop that aborts the whole
+    # block before `remote add` runs. Check first instead.
     Invoke-Step "set remote" {
-        git -C $local remote remove origin 2>$null
-        git -C $local remote add origin "https://github.com/$full.git"
+        $url = "https://github.com/$full.git"
+        $existing = @(git -C $local remote)
+        if ($existing -contains 'origin') { git -C $local remote set-url origin $url }
+        else { git -C $local remote add origin $url }
+        if ($LASTEXITCODE -ne 0) { throw "git remote failed" }
     }
-    # dev first so it becomes the default branch on an empty repo
+
+    # dev first so it becomes the default branch on an empty repo.
+    # Do NOT capture this - git push writes progress to stderr even on success,
+    # and PowerShell 5.1 turns captured native stderr into a NativeCommandError,
+    # reporting successful pushes as failures. Let it stream; check the exit code.
     foreach ($b in @('dev','staging','production')) {
-        Invoke-Step "push $b" { git -C $local push -u origin $b 2>&1 }
+        Invoke-Step "push $b" {
+            # ErrorActionPreference=Stop makes PS 5.1 throw on ANY native stderr
+            # write. git reports "Everything up-to-date" and push progress on
+            # stderr, so successful pushes would be reported as failures.
+            # Relax it locally and trust the exit code instead.
+            $prev = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                git -C $local push -u origin $b *>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "git push $b exited $LASTEXITCODE" }
+            } finally { $ErrorActionPreference = $prev }
+        }
     }
+
+    # Only meaningful once a branch exists; on an empty repo this returns 422.
     Invoke-Step "default branch = dev" { gh api -X PATCH "repos/$full" -f default_branch=dev }
 
     # Linear history is only enforceable if merge commits are disabled at repo level.
@@ -151,11 +178,15 @@ foreach ($r in $allRepos) {
     foreach ($branch in @('dev','staging','production')) {
         $cfg = $protection[$branch]
 
+        # An empty contexts array is rejected by the API ("Invalid request").
+        # Repos without a CI workflow must send null, which disables the status
+        # check requirement entirely rather than requiring zero checks.
+        $checks = if ($contexts.Count -gt 0) {
+            @{ strict = $true; contexts = @($contexts) }   # strict = branch must be up to date with base
+        } else { $null }
+
         $body = @{
-            required_status_checks = @{
-                strict   = $true          # branch must be up to date with base before merge
-                contexts = $contexts
-            }
+            required_status_checks = $checks
             enforce_admins = $cfg.EnforceAdmins
             required_pull_request_reviews = @{
                 required_approving_review_count = $cfg.Approvals
