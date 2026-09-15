@@ -1,0 +1,20 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: logitrack
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # Lets ingress-nginx schedule here and bind host ports; without the label
+      # its nodeSelector never matches and the controller sits Pending.
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP

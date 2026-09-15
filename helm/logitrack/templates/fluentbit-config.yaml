@@ -1,0 +1,131 @@
+{{- if .Values.logging.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush           1
+        Log_Level       info
+        Daemon          off
+        Parsers_File    parsers.conf
+        HTTP_Server     On
+        HTTP_Listen     0.0.0.0
+        HTTP_Port       2020
+
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/containers/*.log
+        # kind runs containerd, so log lines are CRI-formatted, not Docker JSON.
+        Parser            cri
+        Mem_Buf_Limit     16MB
+        Skip_Long_Lines   On
+        Refresh_Interval  5
+        DB                /var/log/flb_kube.db
+
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Kube_Tag_Prefix     kube.var.log.containers.
+        Merge_Log           Off
+        Keep_Log            On
+        Labels              On
+        Annotations         Off
+
+{{- range .Values.logging.fluentbit.namespaces }}
+    [FILTER]
+        Name    grep
+        Match   kube.*
+        Regex   $kubernetes['namespace_name'] ^{{ . }}$
+{{- end }}
+
+    [FILTER]
+        Name         parser
+        Match        kube.*
+        Key_Name     log
+        Parser       pino
+        Reserve_Data On
+
+    [FILTER]
+        Name    lua
+        Match   kube.*
+        script  clef.lua
+        call    to_clef
+
+    [OUTPUT]
+        Name           http
+        Match          kube.*
+        Host           seq
+        Port           {{ .Values.logging.seq.ingestionPort }}
+        URI            /api/events/raw?clef
+        Format         json_lines
+        Json_date_key  false
+        # Retry rather than drop: a Seq restart should delay logs, not lose them.
+        Retry_Limit    5
+
+  parsers.conf: |
+    [PARSER]
+        Name        cri
+        Format      regex
+        Regex       ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+
+    [PARSER]
+        Name        pino
+        Format      json
+        # pino writes epoch milliseconds; without Time_Keep the original is lost.
+        Time_Key    time
+        Time_Format %s
+        Time_Keep   On
+
+  clef.lua: |
+    -- pino and Seq disagree on every field name, so translate rather than
+    -- dump raw JSON and lose severity filtering in the UI.
+    --
+    -- pino:  {"level":30,"time":<epoch ms>,"msg":"...","...":...}
+    -- CLEF:  {"@t":"<ISO8601>","@l":"Information","@m":"...","...":...}
+    local LEVELS = {
+      [10] = "Verbose", [20] = "Debug",   [30] = "Information",
+      [40] = "Warning", [50] = "Error",   [60] = "Fatal",
+    }
+
+    function to_clef(tag, ts, record)
+      local out = {}
+
+      for k, v in pairs(record) do
+        -- Skip the keys being renamed, plus Fluent Bit's own bookkeeping.
+        if k ~= "level" and k ~= "msg" and k ~= "time"
+           and k ~= "log" and k ~= "logtag" and k ~= "pid" then
+          out[k] = v
+        end
+      end
+
+      out["@m"] = record["msg"] or record["log"] or ""
+      out["@l"] = LEVELS[tonumber(record["level"])] or "Information"
+      -- Seq requires ISO 8601; ts is the timestamp Fluent Bit already resolved.
+      out["@t"] = os.date("!%Y-%m-%dT%H:%M:%S", math.floor(ts)) ..
+                  string.format(".%03dZ", math.floor((ts % 1) * 1000))
+
+      -- Flatten the pod metadata so it is filterable in Seq without drilling in.
+      local k8s = record["kubernetes"]
+      if k8s then
+        out["pod"]       = k8s["pod_name"]
+        out["namespace"] = k8s["namespace_name"]
+        out["container"] = k8s["container_name"]
+        out["kubernetes"] = nil
+      end
+
+      -- An error object serialised by pino is far more useful flattened.
+      local err = record["err"]
+      if err and type(err) == "table" then
+        out["@x"] = err["stack"]
+        out["errorType"] = err["type"]
+        out["err"] = nil
+      end
+
+      return 2, ts, out
+    end
+{{- end }}

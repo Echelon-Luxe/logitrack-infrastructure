@@ -1,0 +1,120 @@
+{{- if .Values.logging.enabled }}
+{{- $s := .Values.logging.seq }}
+{{- if $s.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seq-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ $s.persistence.size }}
+  {{- with $s.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seq
+  labels:
+    app.kubernetes.io/name: seq
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so a second pod
+  # would sit Pending forever waiting for a volume the old pod still holds.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: seq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seq
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: seq
+          image: {{ $s.image }}
+          env:
+            - name: ACCEPT_EULA
+              value: {{ ternary "Y" "N" $s.acceptEula | quote }}
+            - name: SEQ_FIRSTRUN_NOAUTHENTICATION
+              # Dev only. There is no login, so anyone who reaches the ingress
+              # reads every log line. Must become false before this leaves kind.
+              value: "true"
+            - name: SEQ_CACHE_SYSTEMRAMTARGET
+              value: "0.7"
+          ports:
+            - name: ui
+              containerPort: 80
+            - name: ingest
+              containerPort: 5341
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: ui
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: ui
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml $s.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if $s.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: seq-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seq
+  labels:
+    app.kubernetes.io/name: seq
+spec:
+  type: ClusterIP
+  ports:
+    - name: ui
+      port: {{ $s.uiPort }}
+      targetPort: ui
+    - name: ingest
+      port: {{ $s.ingestionPort }}
+      targetPort: ingest
+  selector:
+    app.kubernetes.io/name: seq
+{{- if .Values.logging.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seq
+spec:
+  ingressClassName: {{ .Values.logging.ingress.className }}
+  rules:
+    - host: {{ .Values.logging.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: seq
+                port:
+                  number: {{ $s.uiPort }}
+{{- end }}
+{{- end }}

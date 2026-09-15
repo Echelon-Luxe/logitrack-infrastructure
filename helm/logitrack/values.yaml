@@ -98,3 +98,44 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+# Seq log server plus the Fluent Bit agent that feeds it. Services already log
+# structured JSON to stdout, so nothing in the application changes.
+logging:
+  enabled: true
+
+  seq:
+    image: datalust/seq:2024.3
+    acceptEula: true
+    ingestionPort: 5341
+    uiPort: 80
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+    retentionDays: 7
+
+  fluentbit:
+    image: fluent/fluent-bit:3.1.9
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    # Only this namespace; kube-system noise drowns the signal.
+    namespaces:
+      - logitrack-dev
+
+  ingress:
+    enabled: true
+    className: nginx
+    host: logs.logitrack.local
