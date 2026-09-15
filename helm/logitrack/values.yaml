@@ -64,6 +64,8 @@ services:
     port: 3004
   notification-service:
     port: 3005
+  payment-service:
+    port: 3006
 
 # Everything routes to the gateway. Exposing backends directly would bypass
 # its JWT verification and rate limiting.
