@@ -23,6 +23,21 @@ Add to `C:\Windows\System32\drivers\etc\hosts`:
 
 Seq UI: http://logs.logitrack.local
 
+## Logs without the cluster
+
+For services run straight on the host (`npm run dev`), the Fluent Bit agent that
+feeds Seq in the cluster is not there. Bring up Seq on its own and let each
+service post to it:
+
+```powershell
+docker compose -f local\docker-compose.yml up -d seq
+```
+
+Seq UI: http://localhost:8081. Each service ships to it when `SEQ_URL` is set in
+its `.env` (`setup-env.ps1` writes it); unset, it logs to stdout only. Never set
+it on a pod - Fluent Bit already tails stdout there, so every line would land in
+Seq twice.
+
 ## Secrets
 
 The chart expects a `logitrack-secrets` Secret in `logitrack-dev`. It is not
