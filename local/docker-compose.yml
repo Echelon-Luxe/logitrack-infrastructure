@@ -3,8 +3,13 @@
 # Postgres here is OPTIONAL - the services point at Supabase by default.
 # Keep it for offline work or to avoid burning Supabase connection quota.
 #
-#   docker compose -f local/docker-compose.yml up -d redpanda redis
+#   docker compose -f local/docker-compose.yml up -d redpanda redis seq
 #
+# Seq collects the services' logs. They run on the host, not in this file, so
+# nothing tails them the way Fluent Bit does in the cluster - each one posts
+# directly instead, when SEQ_URL is set in its .env.
+#
+#   Seq UI: http://localhost:8081
 #
 services:
   postgres:
@@ -57,5 +62,35 @@ services:
       timeout: 3s
       retries: 10
 
+  seq:
+    image: datalust/seq:2024.3
+    container_name: logitrack-seq
+    environment:
+      ACCEPT_EULA: "Y"
+      # Dev only, and matched to the chart: no login, so anyone who reaches the
+      # port reads every log line.
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+      SEQ_CACHE_SYSTEMRAMTARGET: "0.7"
+    ports:
+      # 8081, not 80: the gateway already owns 8080 on the host.
+      - "8081:80"
+      - "5341:5341"
+    volumes:
+      - seqdata:/data
+    healthcheck:
+      # bash, not curl: the image ships neither curl nor a working seqcli, but
+      # /dev/tcp is a bash builtin. Folded, not quoted: a quoted YAML scalar
+      # turns the \r\n into real line breaks and the request arrives malformed.
+      test: >-
+        bash -c 'exec 3<>/dev/tcp/localhost/80 &&
+        printf "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 &&
+        head -1 <&3 | grep -q 200'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # Seq builds its storage on first run, which outlasts the retries above.
+      start_period: 30s
+
 volumes:
   pgdata:
+  seqdata:

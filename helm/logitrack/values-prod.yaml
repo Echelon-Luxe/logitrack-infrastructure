@@ -60,3 +60,8 @@ services:
     image: { tag: REPLACE_WITH_GIT_SHA }
   notification-service:
     image: { tag: REPLACE_WITH_GIT_SHA }
+
+logging:
+  # Off in production: Seq runs with authentication disabled, so its ingress
+  # would expose every log line to anyone who can resolve the host.
+  enabled: false

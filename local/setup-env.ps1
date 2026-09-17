@@ -51,6 +51,9 @@ foreach ($name in $services.Keys) {
       "KAFKA_BROKERS=`"localhost:9092`""
       "PORT=$($meta.Port)"
       'LOG_LEVEL=debug'
+      # Logs go to stdout and to the Seq in local\docker-compose.yml. Drop this
+      # line to keep them on stdout only.
+      'SEQ_URL="http://localhost:5341"'
     )
     if ($name -eq 'logitrack-payment-service') { $lines += 'PAYSTACK_SECRET_KEY="sk_test_replace_me"' }
 
