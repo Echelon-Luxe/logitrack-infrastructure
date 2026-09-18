@@ -68,6 +68,18 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ $name }}-config
+            {{- if $.Values.secrets.enabled }}
+            # Connection strings and signing keys. Not templated - putting them in
+            # a chart means putting them in git - so the Secret is created out of
+            # band and only referenced here.
+            #
+            # optional: the pod still starts when it is missing, which keeps a
+            # fresh cluster from crash-looping before the Secret is created. The
+            # readiness probe is what reports the truth.
+            - secretRef:
+                name: {{ $.Values.secrets.name }}
+                optional: true
+            {{- end }}
           {{- with $cfg.env }}
           env:
             {{- range $k, $v := . }}

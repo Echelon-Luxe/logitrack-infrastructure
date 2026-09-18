@@ -1,0 +1,146 @@
+name: deploy
+
+# Fired by a service repository once it has built, scanned and pushed an image.
+# The service repo never touches the cluster - it only reports "this SHA exists",
+# and this repository decides what runs, which is why image tags live here.
+#
+# Manual runs are for redeploying the current tags, or deploying a specific SHA
+# without a push on the service side.
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to deploy (e.g. shipment-service). Leave blank to redeploy current tags.
+        required: false
+      image_tag:
+        description: Full git SHA of the image. Required when service is set.
+        required: false
+
+concurrency:
+  # One deploy at a time. Two in parallel would race on the values commit and on
+  # the Helm release lock.
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  NAMESPACE: logitrack-dev
+  RELEASE: logitrack
+  CHART: ./helm/logitrack
+  VALUES: ./helm/logitrack/values-doks.yaml
+
+jobs:
+  deploy:
+    name: deploy to dev-cluster
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commits the image tag back to dev
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: dev
+
+      - name: Resolve inputs
+        id: input
+        env:
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          # Both values arrive from a dispatch payload and end up in a shell
+          # script and a committed file, so they are constrained before they are
+          # written anywhere.
+          if [ -n "${SERVICE}" ] && ! echo "${SERVICE}" | grep -qE '^[a-z0-9-]+$'; then
+            echo "::error::service must match ^[a-z0-9-]+$, got '${SERVICE}'"
+            exit 1
+          fi
+
+          if [ -n "${SERVICE}" ] && [ -z "${IMAGE_TAG}" ]; then
+            echo "::error::service was given without image_tag"
+            exit 1
+          fi
+
+          # Anything but a 40-character hex SHA is rejected: this value is written
+          # into a committed file and then pulled as a container image, so it is
+          # not somewhere to trust an arbitrary dispatch payload.
+          if [ -n "${IMAGE_TAG}" ] && ! echo "${IMAGE_TAG}" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::image_tag must be a full 40-character git SHA, got '${IMAGE_TAG}'"
+            exit 1
+          fi
+
+          # Only services the chart actually knows about.
+          if [ -n "${SERVICE}" ] && ! yq -e ".services | has(\"${SERVICE}\")" "${{ env.CHART }}/values.yaml" >/dev/null 2>&1; then
+            echo "::error::'${SERVICE}' is not in values.yaml services"
+            exit 1
+          fi
+
+          # Written only once everything above has passed.
+          echo "service=${SERVICE}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Pin the new image tag
+        if: steps.input.outputs.service != ''
+        run: |
+          set -euo pipefail
+          SERVICE='${{ steps.input.outputs.service }}'
+          TAG='${{ steps.input.outputs.image_tag }}'
+
+          yq -i ".services.\"${SERVICE}\".image.tag = \"${TAG}\"" "${{ env.VALUES }}"
+          git diff --stat "${{ env.VALUES }}"
+
+      - name: Commit the tag
+        if: steps.input.outputs.service != ''
+        run: |
+          set -euo pipefail
+          if git diff --quiet "${{ env.VALUES }}"; then
+            echo "Tag unchanged - nothing to commit."
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add "${{ env.VALUES }}"
+          git commit -m "deploy(${{ steps.input.outputs.service }}): ${{ steps.input.outputs.image_tag }}"
+
+          # Rebase rather than force: a concurrent deploy of another service must
+          # not be discarded. The concurrency group makes this rare, not impossible.
+          git pull --rebase origin dev
+          git push origin HEAD:dev
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4
+        with:
+          version: v3.16.3
+
+      - name: Write kubeconfig
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.kube"
+          echo '${{ secrets.KUBE_CONFIG }}' | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          # Scoped to logitrack-dev by RBAC, so this is the only thing it can see.
+          kubectl -n "${NAMESPACE}" get deployments
+
+      - name: Helm upgrade
+        run: |
+          set -euo pipefail
+          helm upgrade --install "${RELEASE}" "${CHART}" \
+            --namespace "${NAMESPACE}" \
+            -f "${CHART}/values.yaml" \
+            -f "${VALUES}" \
+            --wait --timeout 10m
+
+      - name: Report
+        if: always()
+        run: |
+          kubectl -n "${NAMESPACE}" get pods -o wide || true
+          kubectl -n "${NAMESPACE}" get certificate,ingress || true
+
+      # --wait already failed the job by here; this is for the person reading it.
+      - name: Why it failed
+        if: failure()
+        run: |
+          kubectl -n "${NAMESPACE}" get events --sort-by=.lastTimestamp | tail -30 || true
+          kubectl -n "${NAMESPACE}" describe pods | grep -A5 -iE 'warning|error|backoff' | head -60 || true

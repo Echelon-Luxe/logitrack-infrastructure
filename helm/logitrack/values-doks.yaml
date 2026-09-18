@@ -1,0 +1,77 @@
+# Values for the DOKS dev-cluster (lon1). Layer last:
+#
+#   helm upgrade --install logitrack ./helm/logitrack -n logitrack-dev
+#     -f ./helm/logitrack/values.yaml
+#     -f ./helm/logitrack/values-doks.yaml
+#
+# Holds no secrets - a hostname, an ACME contact and image tags. The image tags
+# below are written by .github/workflows/deploy.yml, which commits them on every
+# deploy, so this file is the record of what is running on the cluster.
+
+ingress:
+  # Must match controller.ingressClassResource.name in platform.tf, and the
+  # solver pin inside the chart's own Issuer.
+  className: nginx
+  # values-dev.yaml ships logitrack.local, which Let's Encrypt can never validate.
+  host: dev.kmdndd.name.ng
+
+certificates:
+  enabled: true
+  secretName: logitrack-tls
+  issuer:
+    # values.yaml defaults to selfSigned, which is right for kind and useless here.
+    type: acme
+    name: logitrack-issuer
+    acme:
+      # Staging. Production allows only 5 duplicate certificates per week and
+      # locks you out for 7 days once exhausted, so prove issuance works first,
+      # then switch to https://acme-v02.api.letsencrypt.org/directory and delete
+      # the logitrack-tls secret to force reissue.
+      server: https://acme-staging-v02.api.letsencrypt.org/directory
+      # The chart marks this `required` and fails at template time when empty.
+      email: itojedollars3@gmail.com
+
+global:
+  # Created by registry.tf. Without it the private GHCR images never pull.
+  imagePullSecrets:
+    - name: ghcr-pull
+
+# Seq hardcodes SEQ_FIRSTRUN_NOAUTHENTICATION=true and its Ingress has no TLS
+# block, so on a public cluster it would publish every log line, unauthenticated,
+# over plain HTTP. values-prod.yaml disables logging for exactly this reason; a
+# dev cluster on a real domain is the same exposure.
+#
+# Local development still gets Seq through local/docker-compose.yml, and
+# `kubectl logs` still works here.
+logging:
+  enabled: false
+
+# values.yaml defaults every service to image tag "dev", but CI only ever pushes
+# full-SHA tags - there is no "dev" tag in GHCR, so the chart defaults guarantee
+# ImagePullBackOff. These are the newest image per service as of 2026-09-17.
+#
+# Refresh with:
+#   gh api orgs/Echelon-Luxe/packages/container/logitrack-<service>/versions
+#     --jq 'sort_by(.updated_at) | reverse | .[0].metadata.container.tags[0]'
+services:
+  api-gateway:
+    image:
+      tag: df3a29e7508f2bb20925134c04b207b08c21a659
+  user-service:
+    image:
+      tag: 489ff9d023410afae8e4156b4a104179f1facf22
+  shipment-service:
+    image:
+      tag: 861d51c78d15861f12252de7ad73a6e3c66ae1f7
+  driver-service:
+    image:
+      tag: eabb8488396d7ca119b982b0f32851809669348e
+  tracking-service:
+    image:
+      tag: ed853cda503e41d085042092dd7696b85759b55f
+  notification-service:
+    image:
+      tag: 5c0dfd8bdd971137b24848adaff7073ba5b43348
+  payment-service:
+    image:
+      tag: 55b7c94754614e7dd0f91dba56b23c19a40f0864
