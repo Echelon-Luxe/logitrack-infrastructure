@@ -62,6 +62,13 @@ services:
     port: 3000
     public: true
     path: /
+    # The backends split the two: /healthz never touches a dependency, /readyz
+    # checks the database. A UI has no dependency to gate on - it either serves
+    # or it does not - so readiness points at the same route rather than
+    # inventing a /readyz that would only ever mirror /healthz.
+    probes:
+      readiness:
+        path: /healthz
   user-service:
     port: 3001
   shipment-service:
