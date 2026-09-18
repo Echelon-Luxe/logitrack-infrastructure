@@ -16,15 +16,32 @@
   lands in shell history. Nothing is written to disk.
 
 .EXAMPLE
-  .\local\create-k8s-secrets.ps1 -PoolerHost aws-0-eu-west-2.pooler.supabase.com
+  # Host is read from the existing shared Secret unless given:
+  .\local\create-k8s-secrets.ps1
+  .\local\create-k8s-secrets.ps1 -PoolerHost aws-1-eu-west-1.pooler.supabase.com
 #>
 param(
-    [Parameter(Mandatory)][string]$PoolerHost,
+    # Defaults to whatever the existing shared Secret already connects to.
+    # Supabase resolves the tenant per pooler host, so the wrong region fails
+    # with "tenant/user <ref> not found" - which reads like a bad password.
+    [string]$PoolerHost,
     [string]$ProjectRef = 'higeqwjccvkmckdalwtf',
     [string]$Namespace  = 'logitrack-dev'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $PoolerHost) {
+    $existing = kubectl get secret logitrack-secrets -n $Namespace -o jsonpath='{.data.DATABASE_URL}' 2>$null
+    if ($existing) {
+        $url = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($existing))
+        if ($url -match '@([^:/]+):\d+') { $PoolerHost = $Matches[1] }
+    }
+    if (-not $PoolerHost) {
+        throw "Could not read the pooler host from $Namespace/logitrack-secrets. Pass -PoolerHost explicitly (Supabase -> Project Settings -> Database)."
+    }
+    Write-Host "Using pooler host from the existing Secret: $PoolerHost" -ForegroundColor Cyan
+}
 
 $secure = Read-Host -AsSecureString 'Supabase database password'
 $plain  = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
