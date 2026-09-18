@@ -133,7 +133,27 @@ jobs:
             -f "${CHART}/values.yaml" \
             -f "${VALUES}" \
             "${EXTRA[@]}" \
-            --wait --timeout 10m
+            --timeout 5m
+
+
+      # helm --wait blocks on EVERY pod in the release, so a single unhealthy
+      # service - one nobody touched - fails every deploy and burns the full
+      # timeout doing it. Waiting on just the rolled Deployment makes a deploy
+      # take as long as that one service, and lets an unrelated broken pod stay
+      # broken without blocking anyone else's release.
+      - name: Wait for the rollout
+        run: |
+          set -euo pipefail
+          SERVICE='${{ steps.input.outputs.service }}'
+
+          if [ -n "${SERVICE}" ]; then
+            kubectl -n "${NAMESPACE}" rollout status "deployment/${SERVICE}" --timeout=5m
+          else
+            # No service named: this was a manual redeploy, so check them all.
+            for d in $(kubectl -n "${NAMESPACE}" get deploy -o name); do
+              kubectl -n "${NAMESPACE}" rollout status "${d}" --timeout=5m
+            done
+          fi
 
       - name: Report
         if: always()
@@ -141,7 +161,7 @@ jobs:
           kubectl -n "${NAMESPACE}" get pods -o wide || true
           kubectl -n "${NAMESPACE}" get certificate,ingress || true
 
-      # --wait already failed the job by here; this is for the person reading it.
+      # The rollout check already failed the job by here; this is for the reader.
       - name: Why it failed
         if: failure()
         run: |
