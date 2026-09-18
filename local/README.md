@@ -45,7 +45,7 @@ shared DATABASE_URL points all seven at a single schema - which passes readiness
 because /readyz only runs SELECT 1, and then fails on the first real query.
 
 ```powershell
-.\local\create-k8s-secrets.ps1 -PoolerHost aws-0-eu-west-2.pooler.supabase.com
+.\local\create-k8s-secrets.ps1   # pooler host read from the existing Secret
 kubectl -n logitrack-dev rollout restart deployment
 ```
 
