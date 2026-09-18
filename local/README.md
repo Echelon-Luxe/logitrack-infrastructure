@@ -40,6 +40,19 @@ Seq twice.
 
 ## Secrets
 
+Each service owns its own schema, so each needs its own connection string. One
+shared DATABASE_URL points all seven at a single schema - which passes readiness,
+because /readyz only runs SELECT 1, and then fails on the first real query.
+
+```powershell
+.\local\create-k8s-secrets.ps1 -PoolerHost aws-0-eu-west-2.pooler.supabase.com
+kubectl -n logitrack-dev rollout restart deployment
+```
+
+That creates `<service>-secrets` for all six database-backed services. The
+shared Secret below carries what is genuinely common.
+
+
 The chart expects a `logitrack-secrets` Secret in `logitrack-dev`. It is not
 templated: putting values in a chart means putting them in git.
 

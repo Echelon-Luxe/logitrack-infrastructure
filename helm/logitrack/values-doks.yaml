@@ -23,11 +23,14 @@ certificates:
     type: acme
     name: logitrack-issuer
     acme:
-      # Staging. Production allows only 5 duplicate certificates per week and
-      # locks you out for 7 days once exhausted, so prove issuance works first,
-      # then switch to https://acme-v02.api.letsencrypt.org/directory and delete
-      # the logitrack-tls secret to force reissue.
-      server: https://acme-staging-v02.api.letsencrypt.org/directory
+      # Production. Staging issued successfully for dev.kmdndd.name.ng on
+      # 18 Sep, which is the bar for switching: the HTTP-01 challenge works, so
+      # the 5-duplicates-per-week production limit is not at risk of being burnt
+      # on a misconfiguration.
+      #
+      # Staging certificates come from a root no browser trusts, which is why
+      # the site showed "not secure" until this changed.
+      server: https://acme-v02.api.letsencrypt.org/directory
       # The chart marks this `required` and fails at template time when empty.
       email: itojedollars3@gmail.com
 
