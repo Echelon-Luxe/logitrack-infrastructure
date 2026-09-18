@@ -69,15 +69,24 @@ spec:
             - configMapRef:
                 name: {{ $name }}-config
             {{- if $.Values.secrets.enabled }}
-            # Connection strings and signing keys. Not templated - putting them in
-            # a chart means putting them in git - so the Secret is created out of
-            # band and only referenced here.
+            # Neither is templated - putting these in a chart means putting them
+            # in git - so both Secrets are created out of band and only
+            # referenced here.
             #
-            # optional: the pod still starts when it is missing, which keeps a
-            # fresh cluster from crash-looping before the Secret is created. The
-            # readiness probe is what reports the truth.
+            # Shared: signing keys, third-party API keys. Everything that is the
+            # same for every service.
             - secretRef:
                 name: {{ $.Values.secrets.name }}
+                optional: true
+            # Per service: DATABASE_URL and DIRECT_URL. Each service owns its own
+            # schema, so a single shared connection string points all seven at
+            # one schema - which looks healthy, because /readyz only runs
+            # SELECT 1, and then fails on the first real query.
+            #
+            # Listed second on purpose: envFrom applies in order, so a key here
+            # overrides the same key in the shared Secret.
+            - secretRef:
+                name: {{ $name }}-secrets
                 optional: true
             {{- end }}
           {{- with $cfg.env }}
