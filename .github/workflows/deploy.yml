@@ -35,7 +35,7 @@ jobs:
     name: deploy to dev-cluster
     runs-on: ubuntu-latest
     permissions:
-      contents: write # commits the image tag back to dev
+      contents: read
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -81,35 +81,6 @@ jobs:
           echo "service=${SERVICE}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Pin the new image tag
-        if: steps.input.outputs.service != ''
-        run: |
-          set -euo pipefail
-          SERVICE='${{ steps.input.outputs.service }}'
-          TAG='${{ steps.input.outputs.image_tag }}'
-
-          yq -i ".services.\"${SERVICE}\".image.tag = \"${TAG}\"" "${{ env.VALUES }}"
-          git diff --stat "${{ env.VALUES }}"
-
-      - name: Commit the tag
-        if: steps.input.outputs.service != ''
-        run: |
-          set -euo pipefail
-          if git diff --quiet "${{ env.VALUES }}"; then
-            echo "Tag unchanged - nothing to commit."
-            exit 0
-          fi
-
-          git config user.name  'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add "${{ env.VALUES }}"
-          git commit -m "deploy(${{ steps.input.outputs.service }}): ${{ steps.input.outputs.image_tag }}"
-
-          # Rebase rather than force: a concurrent deploy of another service must
-          # not be discarded. The concurrency group makes this rare, not impossible.
-          git pull --rebase origin dev
-          git push origin HEAD:dev
-
       - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4
         with:
           version: v3.16.3
@@ -126,10 +97,42 @@ jobs:
       - name: Helm upgrade
         run: |
           set -euo pipefail
+          SERVICE='${{ steps.input.outputs.service }}'
+          TAG='${{ steps.input.outputs.image_tag }}'
+
+          # Only when a service was named. A bare run redeploys whatever tags
+          # values-doks.yaml already pins.
+          EXTRA=()
+
+          # Helm re-renders the WHOLE release every run, and the tags in
+          # values-doks.yaml are a floor, not a record. Without this loop,
+          # deploying one service would re-render every other service back to
+          # its pinned tag - silently rolling back whatever was deployed last.
+          #
+          # So the running tags are read back off the cluster and re-asserted.
+          # The cluster is the source of truth for what is live; this keeps it
+          # that way. On a first install there are no Deployments yet, the loop
+          # is a no-op, and the pinned tags apply.
+          for name in $(kubectl -n "${NAMESPACE}" get deploy -o custom-columns=:.metadata.name --no-headers); do
+            [ "${name}" = "${SERVICE}" ] && continue
+            image=$(kubectl -n "${NAMESPACE}" get deploy "${name}" -o jsonpath='{.spec.template.spec.containers[0].image}')
+            EXTRA+=(--set "services.${name}.image.tag=${image##*:}")
+          done
+
+          if [ -n "${SERVICE}" ]; then
+            EXTRA+=(--set "services.${SERVICE}.image.tag=${TAG}")
+            echo "Deploying ${SERVICE} at ${TAG}"
+          else
+            echo "No service given - redeploying tags already running."
+          fi
+
+          echo "Tag overrides: ${EXTRA[*]:-none}"
+
           helm upgrade --install "${RELEASE}" "${CHART}" \
             --namespace "${NAMESPACE}" \
             -f "${CHART}/values.yaml" \
             -f "${VALUES}" \
+            "${EXTRA[@]}" \
             --wait --timeout 10m
 
       - name: Report
