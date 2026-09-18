@@ -54,12 +54,11 @@ logging:
 #   gh api orgs/Echelon-Luxe/packages/container/logitrack-<service>/versions
 #     --jq 'sort_by(.updated_at) | reverse | .[0].metadata.container.tags[0]'
 services:
-  # PLACEHOLDER. e908e5a7 predates the /healthz route, so its probes fail and it
-  # never reaches Ready. Update to the SHA CI builds from logitrack-frontend#dev
-  # AFTER that repo's feat/healthz merges, and before merging this.
+  # First image containing /healthz, built from logitrack-frontend#dev after
+  # feat/healthz merged. Anything older fails its probes and restarts forever.
   frontend:
     image:
-      tag: e908e5a7123541c5696bc368ad6c803cdc0c5c52
+      tag: e6c932d50b1062a28145f710ef7e8871f362c3a7
   api-gateway:
     image:
       tag: df3a29e7508f2bb20925134c04b207b08c21a659
