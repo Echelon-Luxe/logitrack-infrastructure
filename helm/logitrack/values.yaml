@@ -50,10 +50,18 @@ defaults:
   env: {}
 
 services:
+  # `public: true` gives a service an ingress rule at `path`. Everything else is
+  # cluster-internal - exposing a backend directly would bypass the gateway's
+  # JWT verification and rate limiting.
   api-gateway:
     port: 8080
     public: true
+    path: /api
     replicas: 2
+  frontend:
+    port: 3000
+    public: true
+    path: /
   user-service:
     port: 3001
   shipment-service:

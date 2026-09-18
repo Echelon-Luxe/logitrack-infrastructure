@@ -1,13 +1,11 @@
 {{- if .Values.ingress.enabled }}
-{{- $gateway := "" }}
-{{- $gatewayPort := 0 }}
+{{- $public := dict }}
 {{- range $name, $svc := .Values.services }}
   {{- if $svc.public }}
-    {{- $gateway = $name }}
-    {{- $gatewayPort = $svc.port }}
+    {{- $_ := set $public (default "/" $svc.path) (dict "name" $name "port" $svc.port) }}
   {{- end }}
 {{- end }}
-{{- if not $gateway }}
+{{- if not $public }}
   {{- fail "ingress.enabled is true but no service is marked `public: true`" }}
 {{- end }}
 apiVersion: networking.k8s.io/v1
@@ -32,12 +30,19 @@ spec:
     - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
-          # All paths to the gateway; backends are not externally routable.
-          - path: /
+          # One rule per service marked `public: true`, at its own `path`.
+          # Backends without one stay cluster-internal.
+          #
+          # Rendered in key order, so "/" comes before "/api". That is fine:
+          # ingress-nginx matches the longest prefix, not the first listed, so
+          # /api/shipments reaches the gateway rather than the frontend.
+          {{- range $path, $backend := $public }}
+          - path: {{ $path | quote }}
             pathType: Prefix
             backend:
               service:
-                name: {{ $gateway }}
+                name: {{ $backend.name }}
                 port:
-                  number: {{ $gatewayPort }}
+                  number: {{ $backend.port }}
+          {{- end }}
 {{- end }}
