@@ -67,6 +67,12 @@ services:
   payment-service:
     port: 3006
 
+# Secret mounted into every service as environment variables. Created out of
+# band (see local/README.md); the chart only references it.
+secrets:
+  enabled: true
+  name: logitrack-secrets
+
 # Everything routes to the gateway. Exposing backends directly would bypass
 # its JWT verification and rate limiting.
 ingress:
