@@ -167,3 +167,37 @@ jobs:
         run: |
           kubectl -n "${NAMESPACE}" get events --sort-by=.lastTimestamp | tail -30 || true
           kubectl -n "${NAMESPACE}" describe pods | grep -A5 -iE 'warning|error|backoff' | head -60 || true
+
+      # Last, so the outcome of every step above is known. Never fails the run.
+      - name: Notify Slack
+        if: always() && job.status != 'cancelled'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+          SERVICE: ${{ steps.input.outputs.service }}
+          IMAGE_TAG: ${{ steps.input.outputs.image_tag }}
+        run: |
+          set -uo pipefail
+          [ -n "${SLACK_WEBHOOK_URL:-}" ] || { echo "No Slack webhook configured; skipping."; exit 0; }
+
+          esc() { sed -e 's/\\/\\\\/g' -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "${SERVICE}" ]; then
+            what="\`${SERVICE}\` at \`${IMAGE_TAG:0:7}\`"
+          else
+            what="current tags (redeploy)"
+          fi
+
+          if [ "${JOB_STATUS}" = "success" ]; then
+            text=":white_check_mark: *Deployed* ${what} to \`${NAMESPACE}\`\nby ${GITHUB_ACTOR} - <${run_url}|view run>"
+          else
+            # Best effort: the kubeconfig may not exist if we failed early.
+            events=$(kubectl -n "${NAMESPACE}" get events --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null | tail -5 | cut -c1-200 | esc || true)
+            text=":x: *Deploy failed* for ${what} on \`${NAMESPACE}\`\nby ${GITHUB_ACTOR} - <${run_url}|view run>"
+            [ -z "${events}" ] || text="${text}\n\`\`\`${events}\`\`\`"
+          fi
+
+          jq -n --arg text "$(printf '%b' "${text}")" '{text: $text}' \
+            | curl -sS -f -X POST -H 'Content-type: application/json' --data @- "${SLACK_WEBHOOK_URL}" \
+            || echo "::warning::Slack notification failed"
