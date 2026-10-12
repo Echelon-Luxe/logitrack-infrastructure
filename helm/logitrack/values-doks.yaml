@@ -1,68 +1,39 @@
-# Values for the DOKS dev-cluster (lon1). Layer last:
-#
-#   helm upgrade --install logitrack ./helm/logitrack -n logitrack-dev
-#     -f ./helm/logitrack/values.yaml
-#     -f ./helm/logitrack/values-doks.yaml
-#
-# Holds no secrets - a hostname, an ACME contact and image tags. The image tags
-# below are written by .github/workflows/deploy.yml, which commits them on every
-# deploy, so this file is the record of what is running on the cluster.
+# DOKS dev cluster (lon1). Applied by .github/workflows/deploy.yml over values.yaml.
 
 ingress:
-  # Must match controller.ingressClassResource.name in platform.tf, and the
-  # solver pin inside the chart's own Issuer.
-  className: nginx
-  # values-dev.yaml ships logitrack.local, which Let's Encrypt can never validate.
+  className: nginx   # must match the controller in platform.tf
   host: dev.kmdndd.name.ng
 
 certificates:
   enabled: true
   secretName: logitrack-tls
   issuer:
-    # values.yaml defaults to selfSigned, which is right for kind and useless here.
     type: acme
     name: logitrack-issuer
     acme:
-      # Production. Staging issued successfully for dev.kmdndd.name.ng on
-      # 18 Sep, which is the bar for switching: the HTTP-01 challenge works, so
-      # the 5-duplicates-per-week production limit is not at risk of being burnt
-      # on a misconfiguration.
-      #
-      # Staging certificates come from a root no browser trusts, which is why
-      # the site showed "not secure" until this changed.
       server: https://acme-v02.api.letsencrypt.org/directory
-      # The chart marks this `required` and fails at template time when empty.
       email: itojedollars3@gmail.com
 
 global:
-  # Created by registry.tf. Without it the private GHCR images never pull.
   imagePullSecrets:
-    - name: ghcr-pull
+    - name: ghcr-pull   # created by registry.tf
 
-# Seq hardcodes SEQ_FIRSTRUN_NOAUTHENTICATION=true and its Ingress has no TLS
-# block, so on a public cluster it would publish every log line, unauthenticated,
-# over plain HTTP. values-prod.yaml disables logging for exactly this reason; a
-# dev cluster on a real domain is the same exposure.
-#
-# Local development still gets Seq through local/docker-compose.yml, and
-# `kubectl logs` still works here.
+# Seq runs without auth or TLS, so it stays off on a public cluster.
 logging:
   enabled: false
 
-# values.yaml defaults every service to image tag "dev", but CI only ever pushes
-# full-SHA tags - there is no "dev" tag in GHCR, so the chart defaults guarantee
-# ImagePullBackOff. These are the newest image per service as of 2026-09-17.
-#
-# Refresh with:
-#   gh api orgs/Echelon-Luxe/packages/container/logitrack-<service>/versions
-#     --jq 'sort_by(.updated_at) | reverse | .[0].metadata.container.tags[0]'
+# Fallback tags for a first install; deploy.yml keeps whatever is already running.
+# UI and API are separate origins; CORS_ORIGINS must match the UI origin exactly.
 services:
-  # First image containing /healthz. Anything older 404s the startup probe and
-  # gets restarted forever.
   frontend:
+    env:
+      API_URL: https://api.dev.kmdndd.name.ng/api
     image:
       tag: e6c932d50b1062a28145f710ef7e8871f362c3a7
   api-gateway:
+    host: api.dev.kmdndd.name.ng
+    env:
+      CORS_ORIGINS: https://dev.kmdndd.name.ng
     image:
       tag: df3a29e7508f2bb20925134c04b207b08c21a659
   user-service:

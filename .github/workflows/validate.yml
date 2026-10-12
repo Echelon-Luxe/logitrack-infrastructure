@@ -1,0 +1,34 @@
+name: validate
+
+# Renders the chart exactly as Argo CD will, so a broken values file or template
+# fails here instead of leaving the Application out of sync.
+on:
+  pull_request:
+    branches: [dev, production]
+    paths: ['helm/**', 'argocd/**']
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4
+        with:
+          version: v3.16.3
+
+      - name: Lint and render production
+        run: |
+          set -euo pipefail
+          cd helm/logitrack
+          helm lint . -f values-prod.yaml -f images-prod.yaml
+          helm template logitrack . -n logitrack-prod -f values-prod.yaml -f images-prod.yaml > /dev/null
+
+      - name: Image tags are full git SHAs
+        run: |
+          set -euo pipefail
+          bad=$(yq '.services[].image.tag' helm/logitrack/images-prod.yaml | grep -vE '^[0-9a-f]{40}$' || true)
+          [ -z "${bad}" ] || { echo "::error::not a full SHA: ${bad}"; exit 1; }

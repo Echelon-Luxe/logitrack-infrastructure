@@ -1,11 +1,22 @@
 {{- if .Values.ingress.enabled }}
-{{- $public := dict }}
+{{- /*
+  Group every `public: true` service by the host it answers on. A service may
+  declare its own `host:` (e.g. api-gateway on api.<domain>); anything without
+  one falls back to the shared `ingress.host`, which keeps single-host
+  path-routing working for dev/kind untouched.
+
+  $hosts: { "<host>": [ {path,name,port}, ... ] }
+*/}}
+{{- $hosts := dict }}
 {{- range $name, $svc := .Values.services }}
   {{- if $svc.public }}
-    {{- $_ := set $public (default "/" $svc.path) (dict "name" $name "port" $svc.port) }}
+    {{- $host := $svc.host | default $.Values.ingress.host }}
+    {{- $entry := dict "path" (default "/" $svc.path) "name" $name "port" $svc.port }}
+    {{- $existing := index $hosts $host | default (list) }}
+    {{- $_ := set $hosts $host (append $existing $entry) }}
   {{- end }}
 {{- end }}
-{{- if not $public }}
+{{- if not $hosts }}
   {{- fail "ingress.enabled is true but no service is marked `public: true`" }}
 {{- end }}
 apiVersion: networking.k8s.io/v1
@@ -21,28 +32,33 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   {{- if .Values.certificates.enabled }}
+  # One SAN cert (certificates.secretName) covering every public host.
   tls:
     - hosts:
-        - {{ .Values.ingress.host | quote }}
+        {{- range $host, $entries := $hosts }}
+        - {{ $host | quote }}
+        {{- end }}
       secretName: {{ .Values.certificates.secretName }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    {{- range $host, $entries := $hosts }}
+    - host: {{ $host | quote }}
       http:
         paths:
-          # One rule per service marked `public: true`, at its own `path`.
-          # Backends without one stay cluster-internal.
+          # One path per public service on this host. Backends without
+          # `public: true` stay cluster-internal, behind the gateway.
           #
-          # Rendered in key order, so "/" comes before "/api". That is fine:
           # ingress-nginx matches the longest prefix, not the first listed, so
-          # /api/shipments reaches the gateway rather than the frontend.
-          {{- range $path, $backend := $public }}
-          - path: {{ $path | quote }}
+          # co-located paths like "/" and "/api" on the same host resolve
+          # correctly regardless of render order.
+          {{- range $entries }}
+          - path: {{ .path | quote }}
             pathType: Prefix
             backend:
               service:
-                name: {{ $backend.name }}
+                name: {{ .name }}
                 port:
-                  number: {{ $backend.port }}
+                  number: {{ .port }}
           {{- end }}
+    {{- end }}
 {{- end }}
