@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars and fill in the two GHCR values.
+#
+# The DigitalOcean token is NOT set here - export it instead:
+#   PowerShell:  $env:DIGITALOCEAN_TOKEN = "dop_v1_..."
+#   bash:        export DIGITALOCEAN_TOKEN=dop_v1_...
+
+cluster_name = "dev-cluster"
+region       = "lon1"
+
+node_size  = "s-2vcpu-4gb"
+node_count = 2
+node_min   = 2
+node_max   = 4
+
+domain   = "kmdndd.name.ng"
+app_host = "dev.kmdndd.name.ng"
+
+# Nameservers are not delegated to DigitalOcean. Terraform prints the records to
+# create instead - see `terraform output dns_records_to_create`.
+manage_dns = false
+
+acme_email = "itojedollars3@gmail.com"
+
+# Classic PAT, read:packages scope only, with an expiry set.
+# Alternatively keep it off disk entirely:
+#   $env:TF_VAR_ghcr_token = (gh auth token)
+ghcr_username = "dollarsmoney"
+ghcr_token    = "ghp_replace_me"
+
+# Only set this if an ACME challenge hangs - see platform.tf.
+# lb_hostname = "dev.kmdndd.name.ng"
