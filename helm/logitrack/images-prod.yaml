@@ -1,0 +1,27 @@
+# What runs in production. Bumped by promotion PRs (.github/workflows/promote.yml);
+# to roll back, revert the PR. Only ever change this file on the production branch.
+services:
+  frontend:
+    image:
+      tag: 2999873fbefc0e9874fe559aaf4cd8e91b7718d5
+  api-gateway:
+    image:
+      tag: c534f41b72e4835aa028e5dd9c8285172c2b7f01
+  user-service:
+    image:
+      tag: e784d631a340ac665ace8bb8b48f916dd6ff29a9
+  shipment-service:
+    image:
+      tag: 3f541c5ceaef879524ebafb3458bf1b7c082f81d
+  driver-service:
+    image:
+      tag: ca3572e1c81dd027a10a6774183b20b268e6774f
+  tracking-service:
+    image:
+      tag: 4c9d09c68fc00c06d6f3bbf6717f7b7af4143822
+  notification-service:
+    image:
+      tag: 0f83a7fcda5fcc7da0c72cec31599873e308f866
+  payment-service:
+    image:
+      tag: 5e0054f3a2729925bce59a851b608a9d1075c061
