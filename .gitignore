@@ -5,3 +5,8 @@
 crash.log
 *.tfvars
 !example.tfvars
+
+# local dev (dev.sh)
+local/.secrets/
+local/logs/
+local/.pids/

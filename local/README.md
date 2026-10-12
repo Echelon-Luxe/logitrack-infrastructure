@@ -1,4 +1,38 @@
-# Local cluster
+# Local development
+
+## Run everything on a Mac (no Kubernetes, no Supabase)
+
+Needs Docker Desktop and Node 24+.
+
+```bash
+cd logitrack-infrastructure/local
+./dev.sh setup   # writes local .env files, starts Postgres/Redpanda/Seq, migrates, seeds users
+./dev.sh up      # starts all 6 services, the gateway (:8080) and the frontend (:3000)
+./dev.sh seed    # demo drivers, shipments, payments and live locations (through the API)
+```
+
+Open http://localhost:3000. The login page has one-click demo accounts; all use
+the password `LogiTrack-demo-2026`:
+
+| Role | Email |
+|---|---|
+| Admin | admin@logitrack.local |
+| Dispatcher | dispatch@logitrack.local |
+| Support | support@logitrack.local |
+| Driver | driver1@ / driver2@ / driver3@logitrack.local |
+| Customer | customer1@ / customer2@ / customer3@logitrack.local |
+
+To watch live tracking, sign in as **driver2** and press **Simulate drive** on
+*My jobs*. In another browser profile, sign in as **customer1** and open *Tracking*.
+
+Other commands: `./dev.sh status`, `./dev.sh logs <service>`, `./dev.sh down`,
+`./dev.sh restart`, `./dev.sh nuke` (stops everything and drops the databases).
+
+- `env` backs up each existing Supabase `.env` to `.env.supabase.bak` once.
+- Payments use a mock provider unless `PAYSTACK_SECRET_KEY` is exported before `./dev.sh env`.
+- Permissions are documented in [`../docs/rbac.md`](../docs/rbac.md).
+
+## Local cluster (kind + Helm)
 
 ```powershell
 kind create cluster --config local\kind-cluster.yaml
