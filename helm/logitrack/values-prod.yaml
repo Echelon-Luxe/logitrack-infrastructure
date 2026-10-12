@@ -1,10 +1,13 @@
-# PRODUCTION.  helm upgrade -f values.yaml -f values-prod.yaml
-# Image tags are git SHAs, set by the GitOps promotion PR.
+# Production (locki-tracker-prod, sfo2). Synced by Argo CD - see argocd/.
+# Image tags live in images-prod.yaml, bumped by promotion PRs.
+#
+# Sized for 3 x s-1vcpu-2gb nodes. Raise replicas/resources and turn autoscaling
+# on (it also needs metrics-server) once the node pool is resized.
 
 env: production
 
 ingress:
-  host: logitrack.example.com
+  host: kmdndd.name.ng
   className: nginx
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -18,50 +21,40 @@ certificates:
     type: acme
     name: logitrack-issuer
     acme:
-      # Staging endpoint. Production has a 5-duplicate-certs-per-week limit that
-      # locks you out for 7 days once exhausted. Switch only when issuance works.
+      # Staging until the first certificate issues, then switch to
+      # https://acme-v02.api.letsencrypt.org/directory (5 dupes/week limit).
       server: https://acme-staging-v02.api.letsencrypt.org/directory
-      email: ""   # required - the chart fails fast if empty
+      email: itojedollars3@gmail.com
+
+global:
+  imagePullSecrets:
+    - name: ghcr-pull
 
 defaults:
-  replicas: 3
+  replicas: 1
   logLevel: info
-  # Starting estimates, not measurements. Replace with observed p95 after load test.
+  autoscaling:
+    enabled: false
   resources:
     requests:
-      cpu: 200m
-      memory: 512Mi
+      cpu: 50m
+      memory: 128Mi
     limits:
-      cpu: 1000m
-      memory: 1Gi
-  autoscaling:
-    enabled: true
-    minReplicas: 3
-    maxReplicas: 10
-    targetCPUUtilizationPercentage: 70
-  terminationGracePeriodSeconds: 60
+      cpu: 300m
+      memory: 256Mi
 
+# UI and API are separate origins; CORS_ORIGINS must match the UI origin exactly.
 services:
   api-gateway:
-    replicas: 4
-    autoscaling:
-      enabled: true
-      minReplicas: 4
-      maxReplicas: 20
-      targetCPUUtilizationPercentage: 65
-    image: { tag: REPLACE_WITH_GIT_SHA }
-  user-service:
-    image: { tag: REPLACE_WITH_GIT_SHA }
-  shipment-service:
-    image: { tag: REPLACE_WITH_GIT_SHA }
-  driver-service:
-    image: { tag: REPLACE_WITH_GIT_SHA }
-  tracking-service:
-    image: { tag: REPLACE_WITH_GIT_SHA }
-  notification-service:
-    image: { tag: REPLACE_WITH_GIT_SHA }
+    host: api.kmdndd.name.ng   # path stays /api so /metrics is not public
+    replicas: 2
+    env:
+      CORS_ORIGINS: https://kmdndd.name.ng
+  frontend:
+    host: kmdndd.name.ng
+    env:
+      API_URL: https://api.kmdndd.name.ng/api
 
+# Seq runs without auth or TLS.
 logging:
-  # Off in production: Seq runs with authentication disabled, so its ingress
-  # would expose every log line to anyone who can resolve the host.
   enabled: false

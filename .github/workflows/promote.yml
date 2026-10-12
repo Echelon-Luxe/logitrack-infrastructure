@@ -1,0 +1,85 @@
+name: promote
+
+# A service repo dispatches here after pushing an image. This opens (or updates)
+# one PR per service against production, bumping its tag in images-prod.yaml.
+# Merging the PR is the deploy: Argo CD syncs production within minutes.
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to promote (e.g. shipment-service)
+        required: true
+      image_tag:
+        description: Full 40-character git SHA of the image
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: promote-${{ github.event.client_payload.service || inputs.service }}
+  cancel-in-progress: false
+
+env:
+  BASE: production
+  IMAGES: helm/logitrack/images-prod.yaml
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.BASE }}
+
+      # Both values come from a dispatch payload and end up in a commit and a
+      # container image reference, so they are validated before use.
+      - name: Validate inputs
+        env:
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          echo "${SERVICE}" | grep -qE '^[a-z0-9-]+$' || { echo "::error::bad service '${SERVICE}'"; exit 1; }
+          echo "${TAG}" | grep -qE '^[0-9a-f]{40}$' || { echo "::error::image_tag must be a full git SHA"; exit 1; }
+          yq -e ".services | has(\"${SERVICE}\")" helm/logitrack/values.yaml >/dev/null \
+            || { echo "::error::'${SERVICE}' is not in values.yaml"; exit 1; }
+          echo "SERVICE=${SERVICE}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Open or update promotion PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current=$(yq ".services.\"${SERVICE}\".image.tag" "${IMAGES}")
+          if [ "${current}" = "${TAG}" ]; then
+            echo "${SERVICE} is already at ${TAG} in production."
+            exit 0
+          fi
+
+          branch="promote/${SERVICE}"
+          yq -i ".services.\"${SERVICE}\".image.tag = \"${TAG}\"" "${IMAGES}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${branch}"
+          git commit -am "deploy(${SERVICE}): ${TAG:0:7}"
+          # Force: an open PR for this service always carries its newest image.
+          git push --force origin "${branch}"
+
+          repo="https://github.com/${GITHUB_REPOSITORY_OWNER}/logitrack-${SERVICE}"
+          title="Deploy ${SERVICE} ${TAG:0:7} to production"
+          body=$(printf 'Promotes `%s` from `%s` to `%s`.\n\nChanges: %s/compare/%s...%s\n\nMerging deploys it - Argo CD syncs `logitrack-prod`.' \
+            "${SERVICE}" "${current:0:7}" "${TAG:0:7}" "${repo}" "${current}" "${TAG}")
+
+          pr=$(gh pr list --head "${branch}" --base "${BASE}" --state open --json number --jq '.[0].number')
+          if [ -n "${pr}" ]; then
+            gh pr edit "${pr}" --title "${title}" --body "${body}"
+            echo "Updated PR #${pr}"
+          else
+            gh pr create --head "${branch}" --base "${BASE}" --title "${title}" --body "${body}"
+          fi

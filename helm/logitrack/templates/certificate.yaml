@@ -37,8 +37,20 @@ spec:
     name: {{ $issuer.name }}
     kind: Issuer
   commonName: {{ .Values.ingress.host }}
+  # SAN cert: the apex (commonName) plus every distinct per-service public host.
   dnsNames:
+    {{- $seen := dict }}
     - {{ .Values.ingress.host | quote }}
+    {{- $_ := set $seen .Values.ingress.host true }}
+    {{- range $name, $svc := .Values.services }}
+      {{- if $svc.public }}
+        {{- $host := $svc.host | default $.Values.ingress.host }}
+        {{- if not (hasKey $seen $host) }}
+    - {{ $host | quote }}
+        {{- $_ := set $seen $host true }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
   duration: 2160h
   renewBefore: 360h
   privateKey:

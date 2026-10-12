@@ -1,0 +1,27 @@
+# Applied once by hand (see argocd/README.md); after that Argo CD keeps the
+# cluster in sync with the production branch.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: logitrack-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Echelon-Luxe/logitrack-infrastructure.git
+    targetRevision: production
+    path: helm/logitrack
+    helm:
+      releaseName: logitrack
+      valueFiles:
+        - values-prod.yaml
+        - images-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logitrack-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
